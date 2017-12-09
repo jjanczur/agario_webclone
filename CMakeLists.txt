@@ -3,5 +3,5 @@ project(agario_webclone)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(SOURCE_FILES main.cpp)
+set(SOURCE_FILES Server/main.cpp)
 add_executable(agario_webclone ${SOURCE_FILES})
