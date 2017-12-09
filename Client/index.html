@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Agario webclone Beta v.1.0.0</title>
+    <style type="text/css">
+
+        #canvas{background-color: #000;}
+
+    </style>
+</head>
+<body>
+
+<canvas id="canvas" width="640" height="360"></canvas>
+
+    <article>
+        <section>
+            <h1>Starting with JavaScript ;)</h1>
+            <p>Starting with HTML5 and JS!!! ;)</p>
+            <p>Actual time is :</p>
+            <p id="time"></p>
+
+            <button type="button" onclick="showTime()">Actual time</button>
+
+            <table id="pos_table">
+                <tr>
+                    <th>x</th>
+                    <th>y</th>
+                </tr>
+                <tr>
+                    <td>0</td>
+                    <td>0</td>
+                </tr>
+            </table>
+
+            <p>
+                Login:<br>
+                <input type="text" id="username"><br>
+                Password:<br>
+                <input type="password" id="pswd">
+            </p>
+
+            <button type="button" onclick="login()">Log</button>
+
+        </section>
+    </article>
+
+    <script src="js/Client.js"></script>
+
+</body>
+</html>
