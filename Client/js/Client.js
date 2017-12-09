@@ -35,7 +35,9 @@ function showTime(){
 function login(){
 
     var login = document.getElementById("username");
+    var psw = document.getElementById("pswd");
+    var text = "Loguje jako: " + login.value + " z haslem " + psw.value;
 
-    alert();
+    alert(text);
 
 }
