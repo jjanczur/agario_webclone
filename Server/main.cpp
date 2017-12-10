@@ -11,6 +11,7 @@ private:
     int counter = 0;
 
 public:
+    //parsować rozne rzeczy i sprawdzac co dostaję!!!
     void process_http_request(boost::beast::http::request<boost::beast::http::dynamic_body> &req,
                               boost::beast::http::response<boost::beast::http::dynamic_body> &res) {
 
