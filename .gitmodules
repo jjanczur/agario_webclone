@@ -1,0 +1,6 @@
+[submodule "Server/beast"]
+	path = Server/beast
+	url = https://github.com/boostorg/beast
+[submodule "json"]
+	path = json
+	url = https://github.com/nlohmann/json
