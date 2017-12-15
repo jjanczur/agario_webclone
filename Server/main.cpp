@@ -1,125 +1,256 @@
 #include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/asio.hpp>
-
+#include <boost/beast/websocket.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <algorithm>
+#include <cstdlib>
+#include <functional>
 #include <iostream>
-#include <json.hpp>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
 
-class game_state : public boost::noncopyable {
+using tcp = boost::asio::ip::tcp;               // from <boost/asio/ip/tcp.hpp>
+namespace websocket = boost::beast::websocket;  // from <boost/beast/websocket.hpp>
 
-private:
-    int counter = 0;
+//------------------------------------------------------------------------------
 
-public:
-    //parsować rozne rzeczy i sprawdzac co dostaję!!!
-    void process_http_request(boost::beast::http::request<boost::beast::http::dynamic_body> &req,
-                              boost::beast::http::response<boost::beast::http::dynamic_body> &res) {
-
-        nlohmann::json request_json = nlohmann::json::parse(
-            boost::beast::buffers_to_string(
-                    // boost::beast::buffers(
-                            req.body().data()
-                    //)
-            )
-        );
-        nlohmann::json response_json;
-
-        response_json = request_json;
-        response_json["dupa"] = "dupa 123";
-
-        res.set(boost::beast::http::field::content_type, "application/json");
-        boost::beast::ostream(res.body()) << response_json << std::endl;
-    }
-
-};
-
-class http_connection : public std::enable_shared_from_this<http_connection> {
-public:
-    // rvalue - jednorazowe wykorzystanie - bez kopiowania
-    http_connection(boost::asio::ip::tcp::socket && socket, game_state & gs):
-    // std::move wskazanie że obj będzie nie potrzebny - (przenoszenie bez żadne kopii - przyspieszenie)
-            socket(std::move(socket)), gs(gs)
-    {
-
-    }
-
-private:
-    boost::asio::ip::tcp::socket socket;
-    boost::beast::flat_buffer buffer { 8192 };
-    boost::beast::http::request<boost::beast::http::dynamic_body> request;
-    boost::beast::http::response<boost::beast::http::dynamic_body> response;
-
-    game_state & gs;
-
-
-public:
-    void start() {
-        read_request();
-    }
-
-private:
-    void read_request() {
-        auto self = shared_from_this();
-
-        boost::beast::http::async_read(
-          socket,
-          buffer,
-          request,
-          [self] (boost::beast::error_code ec, std::size_t bytes_transferred) {
-              boost::ignore_unused(bytes_transferred);
-              if(!ec)
-                  self->process_request();
-          }
-        );
-    }
-
-    void process_request() {
-        gs.process_http_request(request, response);
-        write_response();
-    }
-
-    void write_response() {
-        auto self = shared_from_this();
-
-
-        response.keep_alive(false);
-        response.version(request.version());
-
-        response.set(boost::beast::http::field::content_length, response.body().size());
-
-        boost::beast::http::async_write(
-          socket,
-          response,
-          [self] (boost::beast::error_code ec, std::size_t) {
-              self->socket.shutdown(boost::asio::ip::tcp::socket::shutdown_send, ec);
-          }
-        );
-    }
-};
-
-
-void accept_connection(boost::asio::ip::tcp::acceptor & acceptor, boost::asio::ip::tcp::socket & socket, game_state & gs) {
-    acceptor.async_accept(socket, [&] (boost::system::error_code ec) {
-
-        if(!ec)
-            std::make_shared<http_connection>(std::move(socket), gs)->start();
-
-        accept_connection(acceptor, socket, gs);
-    });
+// Report a failure
+void
+fail(boost::system::error_code ec, char const* what)
+{
+    std::cerr << what << ": " << ec.message() << "\n";
 }
-int main() {
 
-    game_state gs;
+// Echoes back all received WebSocket messages
+class session : public std::enable_shared_from_this<session>
+{
+    websocket::stream<tcp::socket> ws_;
+    boost::asio::io_service::strand strand_;
+    boost::beast::multi_buffer buffer_;
+    boost::shared_ptr<std::vector<char> > data_;
 
-    boost::asio::io_service ioc;
+public:
+    // Take ownership of the socket
+    explicit
+    session(tcp::socket socket)
+            : ws_(std::move(socket))
+            , strand_(ws_.get_io_service())
+    {
+    }
 
-    boost::asio::ip::tcp::endpoint endpoint{boost::asio::ip::address_v4::any(), 8080};
-    boost::asio::ip::tcp::acceptor acceptor(ioc, endpoint);
-    boost::asio::ip::tcp::socket socket{ioc};
+    // Start the asynchronous operation
+    void
+    run()
+    {
+        // Accept the websocket handshake
+        ws_.async_accept(
+                strand_.wrap(std::bind(
+                        &session::on_accept,
+                        shared_from_this(),
+                        std::placeholders::_1)));
+    }
 
-    accept_connection(acceptor, socket, gs);
+    void
+    on_accept(boost::system::error_code ec)
+    {
+        if(ec)
+            return fail(ec, "accept");
 
-    ioc.run();
+        // Read a message
+        do_read();
+    }
 
-    return 0;
+    void
+    do_read()
+    {
+        // Read a message into our buffer
+        ws_.async_read(
+                buffer_,
+                strand_.wrap(std::bind(
+                        &session::on_read,
+                        shared_from_this(),
+                        std::placeholders::_1,
+                        std::placeholders::_2)));
+    }
+
+    void
+    on_read(
+            boost::system::error_code ec,
+            std::size_t bytes_transferred)
+    {
+        boost::ignore_unused(bytes_transferred);
+
+        // This indicates that the session was closed
+        if(ec == websocket::error::closed)
+            return;
+
+        if(ec)
+            fail(ec, "read");
+
+        std::cout << "Server reading data ..." << std::endl;
+        std::cout << "Data read:   " << boost::beast::buffers(buffer_.data()) << std::endl;
+
+        // Echo the message
+        ws_.text(ws_.got_text());
+//        std::string dup = "Kurwa dupa";
+//
+//        data_ = (new std::vector<char>(dup.begin(), dup.end()));
+//        auto buff_1 = buffer_.prepare(dup.length());
+//
+//        buff_1.
+
+        ws_.async_write(
+                buffer_.data(),
+                strand_.wrap(std::bind(
+                        &session::on_write,
+                        shared_from_this(),
+                        std::placeholders::_1,
+                        std::placeholders::_2)));
+
+    }
+
+    void
+    on_write(
+            boost::system::error_code ec,
+            std::size_t bytes_transferred)
+    {
+        boost::ignore_unused(bytes_transferred);
+
+        if(ec)
+            return fail(ec, "write");
+
+        //std::cout << "Server writes data ..." << std::endl;
+        //std::cout << "Data read:   " << boost::beast::buffers(buffer_.data()) << std::endl;
+
+        //std::cout << "Before: " << boost::beast::buffers(buffer_.data()) << std::endl;
+        // Clear the buffer
+        buffer_.consume(buffer_.size());
+        //std::cout << "After: " << boost::beast::buffers(buffer_.data()) << std::endl;
+
+        // Do another read
+        do_read();
+    }
+};
+
+//------------------------------------------------------------------------------
+
+// Accepts incoming connections and launches the sessions
+class listener : public std::enable_shared_from_this<listener>
+{
+    tcp::acceptor acceptor_;
+    tcp::socket socket_;
+
+public:
+    listener(
+            boost::asio::io_service& ios,
+            tcp::endpoint endpoint)
+            : acceptor_(ios)
+            , socket_(ios)
+    {
+        boost::system::error_code ec;
+
+        // Open the acceptor
+        acceptor_.open(endpoint.protocol(), ec);
+        if(ec)
+        {
+            fail(ec, "open");
+            std::cout << "Listener opened connection ..." << std::endl;
+            return;
+        }
+
+        // Bind to the server address
+        acceptor_.bind(endpoint, ec);
+        if(ec)
+        {
+            fail(ec, "bind");
+            std::cout << "Listener bind connection ..." << std::endl;
+            return;
+        }
+
+        // Start listening for connections
+        acceptor_.listen(
+                boost::asio::socket_base::max_connections, ec);
+        if(ec)
+        {
+            fail(ec, "listen");
+            std::cout << "Listener listen connection ..." << std::endl;
+            return;
+        }
+    }
+
+    // Start accepting incoming connections
+    void
+    run()
+    {
+        if(! acceptor_.is_open())
+            return;
+        do_accept();
+    }
+
+    void
+    do_accept()
+    {
+        acceptor_.async_accept(
+                socket_,
+                std::bind(
+                        &listener::on_accept,
+                        shared_from_this(),
+                        std::placeholders::_1));
+    }
+
+    void
+    on_accept(boost::system::error_code ec)
+    {
+        if(ec)
+        {
+            fail(ec, "accept");
+        }
+        else
+        {
+            // Create the session and run it
+            std::make_shared<session>(std::move(socket_))->run();
+        }
+
+        // Accept another connection
+        do_accept();
+    }
+};
+
+//------------------------------------------------------------------------------
+
+int main(int argc, char* argv[])
+{
+    // Check command line arguments.
+    if (argc != 4)
+    {
+        std::cerr <<
+                  "Usage: websocket-server-async <address> <port> <threads>\n" <<
+                  "Example:\n" <<
+                  "    websocket-server-async 0.0.0.0 8080 1\n";
+        return EXIT_FAILURE;
+    }
+    auto const address = boost::asio::ip::address::from_string(argv[1]);
+    auto const port = static_cast<unsigned short>(std::atoi(argv[2]));
+    auto const threads = std::max<std::size_t>(1, std::atoi(argv[3]));
+
+    // The io_service is required for all I/O
+    boost::asio::io_service ios{threads};
+
+    // Create and launch a listening port
+    std::make_shared<listener>(ios, tcp::endpoint{address, port})->run();
+
+    // Run the I/O service on the requested number of threads
+    std::vector<std::thread> v;
+    v.reserve(threads - 1);
+    for(auto i = threads - 1; i > 0; --i)
+        v.emplace_back(
+                [&ios]
+                {
+                    ios.run();
+                });
+    ios.run();
+
+    return EXIT_SUCCESS;
 }

@@ -1,9 +1,34 @@
 document.addEventListener("DOMContentLoaded", init, false);
 
+var connection;
+
 function init()
 {
     //var login = doument.getElementById("login");
     document.addEventListener("mousemove", getPosition, false);
+
+    connection = new WebSocket('ws://127.0.0.1:8569/myapp');
+
+    console.log("Dupa");
+    console.log("Dupa", connection);
+
+    connection.onopen = function(){
+        //Send a small message to the console once the connection is established
+        console.log('Connection open!');
+    }
+
+    connection.onclose = function(){
+        console.log('Connection closed');
+    }
+
+    connection.onerror = function(error){
+        console.log('Error detected: ' + error);
+    }
+
+    connection.onmessage = function(e){
+        var server_message = e.data;
+        console.log("Serwer: " + server_message);
+    }
 }
 
 function getPosition(event)
@@ -34,10 +59,16 @@ function showTime(){
 
 function login(){
 
+    console.log("Loduje function");
+
     var login = document.getElementById("username");
     var psw = document.getElementById("pswd");
     var text = "Loguje jako: " + login.value + " z haslem " + psw.value;
 
-    alert(text);
+
+
+    connection.send(text);
+
+    //alert(text);
 
 }
